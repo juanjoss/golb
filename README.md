@@ -1,3 +1,3 @@
 # golb
 
-Simple load balancer with RR balancing and active health check.
+Simple load balancer with RR balancing and active/pasive health check.
