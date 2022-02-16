@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -25,6 +27,20 @@ type Backend struct {
 	mu     sync.RWMutex
 }
 
+func (b *Backend) SetState(state bool) {
+	b.mu.Lock()
+	b.IsDead = state
+	b.mu.Unlock()
+}
+
+func (b *Backend) IsDown() bool {
+	b.mu.Lock()
+	isAlive := b.IsDead
+	b.mu.Unlock()
+
+	return isAlive
+}
+
 var mu sync.Mutex
 var idx int = 0
 
@@ -32,6 +48,12 @@ func lbHandler(w http.ResponseWriter, r *http.Request) {
 	numBackends := len(config.Backends)
 
 	mu.Lock()
+
+	currentBackend := config.Backends[idx%numBackends]
+	if currentBackend.IsDown() {
+		idx++
+	}
+
 	targetUrl, err := url.Parse(config.Backends[idx%numBackends].URL)
 	if err != nil {
 		log.Fatal(err.Error())
@@ -40,7 +62,46 @@ func lbHandler(w http.ResponseWriter, r *http.Request) {
 	mu.Unlock()
 
 	reverseProxy := httputil.NewSingleHostReverseProxy(targetUrl)
-	reverseProxy.ServeHTTP(w, r)
+	reverseProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
+		log.Printf("%v is dead.", targetUrl)
+		currentBackend.SetState(true)
+		lbHandler(w, r)
+	}
+}
+
+func isAlive(url *url.URL) bool {
+	conn, err := net.DialTimeout("tcp", url.Host, time.Minute*1)
+	if err != nil {
+		log.Printf("Unreachable to %v, error:", url.Host, err.Error())
+		return false
+	}
+
+	defer conn.Close()
+	return true
+}
+
+func healthCheck() {
+	t := time.NewTicker(time.Minute * 1)
+	for {
+		select {
+		case <-t.C:
+			for _, backend := range config.Backends {
+				pingUrl, err := url.Parse(backend.URL)
+				if err != nil {
+					log.Fatal(err.Error())
+				}
+
+				isAlive := isAlive(pingUrl)
+				backend.SetState(!isAlive)
+				msg := "ok"
+
+				if !isAlive {
+					msg = "dead"
+				}
+				log.Printf("%v checked %v by healthcheck", backend.URL, msg)
+			}
+		}
+	}
 }
 
 var config Config
