@@ -1,19 +1,11 @@
 {
-    "proxy": {
-        "port": "3000"
-    },
+    "proxyPort": "3000",
     "backends": [
         {
             "url": "http://localhost:3001/"
         },
         {
             "url": "http://localhost:3002/"
-        },
-        {
-            "url": "http://localhost:3003/"
-        },
-        {
-            "url": "http://localhost:3004/"
         }
     ]
 }
