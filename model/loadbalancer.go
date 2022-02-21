@@ -1,8 +1,6 @@
 package model
 
 import (
-	"encoding/json"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -13,23 +11,15 @@ import (
 )
 
 type LoadBalancer struct {
-	Conf Config
+	Conf *Config
 	id   int
 	mu   sync.Mutex
 }
 
 // initializes a load balancer
 func Init() *LoadBalancer {
-	// reading config
-	var config Config
-	data, err := ioutil.ReadFile("./config.json")
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-	json.Unmarshal(data, &config)
-
 	return &LoadBalancer{
-		Conf: config,
+		Conf: ReadConfig(),
 		id:   0,
 	}
 }
