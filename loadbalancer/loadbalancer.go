@@ -1,4 +1,4 @@
-package model
+package loadbalancer
 
 import (
 	"log"
@@ -10,30 +10,48 @@ import (
 	"time"
 )
 
-type LoadBalancer struct {
-	Conf *Config
+type Provider interface {
+	HandleRequest(w http.ResponseWriter, r *http.Request)
+}
+
+type loadBalancingProvider struct {
+	Conf *config
 	id   int
 	mu   sync.Mutex
 }
 
-// initializes a load balancer
-func Init() *LoadBalancer {
-	return &LoadBalancer{
+func NewLoadBalancingProvider() *loadBalancingProvider {
+	return &loadBalancingProvider{
 		Conf: ReadConfig(),
 		id:   0,
 	}
 }
 
+// running the load balancer
+func (lb *loadBalancingProvider) ListenAndServe() {
+	// creating server
+	s := http.Server{
+		Addr:    ":" + lb.Conf.ProxyPort,
+		Handler: http.HandlerFunc(lb.HandleRequest),
+	}
+
+	// error logging
+	log.Printf("load balancer starting on port " + s.Addr)
+	if err := s.ListenAndServe(); err != nil {
+		log.Fatalf("error starting load balancer: %v", err.Error())
+	}
+}
+
 // load balancer main handler
-func (lb *LoadBalancer) Handler(w http.ResponseWriter, r *http.Request) {
-	numBackends := len(lb.Conf.Backends)
+func (lb *loadBalancingProvider) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	numBackends := len(lb.Conf.Servers)
 
 	lb.mu.Lock()
 	if lb.id == numBackends {
 		lb.id = 0
 	}
 
-	currentBackend := lb.Conf.Backends[lb.id%numBackends]
+	currentBackend := lb.Conf.Servers[lb.id%numBackends]
 	if currentBackend.IsDown() {
 		lb.id++
 	}
@@ -44,7 +62,7 @@ func (lb *LoadBalancer) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// reseting load balancer's backend id
-	log.Printf("request incoming, redirected to %v (backend %d)\n\n", targetUrl, lb.id+1)
+	log.Printf("request incoming, redirected to %v (%v)\n\n", targetUrl, currentBackend.Name)
 	lb.id++
 
 	lb.mu.Unlock()
@@ -55,19 +73,19 @@ func (lb *LoadBalancer) Handler(w http.ResponseWriter, r *http.Request) {
 	reverseProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
 		log.Printf("%v is dead\n\n", targetUrl)
 		currentBackend.SetState(true)
-		lb.Handler(w, r)
+		lb.HandleRequest(w, r)
 	}
 
 	reverseProxy.ServeHTTP(w, r)
 }
 
 // passive healthcheck
-func (lb *LoadBalancer) HealthCheck() {
+func (lb *loadBalancingProvider) HealthCheck() {
 	t := time.NewTicker(time.Minute * 1)
 
 	for {
 		<-t.C
-		for _, backend := range lb.Conf.Backends {
+		for _, backend := range lb.Conf.Servers {
 			pingUrl, err := url.Parse(backend.URL)
 			if err != nil {
 				log.Fatal(err.Error())

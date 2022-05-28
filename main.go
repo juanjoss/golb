@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/fuato1/golb/model"
+	"github.com/fuato1/golb/loadbalancer"
 )
 
 func runBackend(port string, id int) {
@@ -29,7 +29,7 @@ func runBackend(port string, id int) {
 
 func main() {
 	// initializing load balancer
-	lb := model.Init()
+	lb := loadbalancer.NewLoadBalancingProvider()
 
 	// creating backends
 	go runBackend("3001", 1)
@@ -38,14 +38,5 @@ func main() {
 	// running passive healthcheck routine
 	go lb.HealthCheck()
 
-	// creating server
-	s := http.Server{
-		Addr:    ":" + lb.Conf.ProxyPort,
-		Handler: http.HandlerFunc(lb.Handler),
-	}
-
-	// error logging
-	if err := s.ListenAndServe(); err != nil {
-		log.Fatal(err.Error())
-	}
+	lb.ListenAndServe()
 }
